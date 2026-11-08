@@ -197,7 +197,10 @@ async function importCalibration(fileList) {
 async function updateCalibrationUi() {
   const st = $("cal-status");
   if (!serial) st.textContent = "No camera connected.";
-  else if (calibrationSource) st.textContent = `Camera ${serial}: factory calibration loaded${calibrationSource === "local" ? " from the project folder (now saved in this browser)" : ""}.`;
+  else if (calibrationSource) {
+    const where = ["localhost", "127.0.0.1"].includes(location.hostname) ? "the project folder" : "the website";
+    st.textContent = `Camera ${serial}: factory calibration loaded${calibrationSource === "local" ? ` from ${where} (now saved in this browser)` : ""}.`;
+  }
   else st.textContent = `Camera ${serial}: no calibration found. The image is uncorrected.`;
 
   if (serial && !calibrationSource) {
@@ -682,8 +685,11 @@ function initControls() {
   $("btn-import-files").onclick = () => $("file-import-files").click();
   for (const id of ["file-import", "file-import-files"]) {
     $(id).onchange = (e) => {
-      if (e.target.files.length) importCalibration(e.target.files);
+      // Copy first: input.files is live, and clearing the input empties it while the
+      // (async) import is still reading the files.
+      const files = [...e.target.files];
       e.target.value = "";
+      if (files.length) importCalibration(files);
     };
   }
 

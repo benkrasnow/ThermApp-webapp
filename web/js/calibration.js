@@ -12,7 +12,10 @@ const MAP_BYTES = PIXELS * 4;
  */
 export function checkCalibration(files) {
   for (const name of REQUIRED_FILES) {
-    if (!files[name]) throw new Error(`Missing ${name}`);
+    if (!files[name]) {
+      const got = Object.keys(files);
+      throw new Error(`Missing ${name} (received ${got.length ? got.join(", ") : "no calibration files"})`);
+    }
   }
   for (let i = 1; i <= 10; i++) {
     const n = files[`${i}.bin`].byteLength;
