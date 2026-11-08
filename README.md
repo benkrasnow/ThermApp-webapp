@@ -4,6 +4,10 @@ A browser app for the **Opgal Therm-App** USB thermal camera. It talks to the ca
 
 The original Android apps for this camera are no longer maintained, ship only 32-bit native code (so they don't run on 64-bit-only phones), and depended on an Opgal server for calibration downloads that no longer exists. This project reimplements everything from the USB protocol up.
 
+## ▶ [Open the app: benkrasnow.github.io/ThermApp-webapp/web/](https://benkrasnow.github.io/ThermApp-webapp/web/)
+
+Open the link in **Chrome** (Android or desktop) or **Edge** (Windows), plug in the camera and tap **Connect**. It works right in the browser tab. Tap **Install as an app** to get a home-screen or desktop icon that opens full-window and also works offline. You'll need your camera's calibration files ([step 1](#1-you-need-your-cameras-calibration-files)) and, on Windows, a one-time USB driver ([step 2](#2-windows-edge-or-chrome)).
+
 ![Therm-App Web on a Pixel 6, landscape](docs/images/android-landscape.jpg)
 
 ## Tested on
@@ -45,8 +49,8 @@ Without these files the app still shows an image, but it's uncorrected and has n
    3. Choose **Options → List All Devices**.
    4. Select **"USB2.0"** in the drop-down and check that the USB ID reads **1772 0002**.
    5. Set the target driver to **WinUSB** and click **Install Driver** (or **Replace Driver**).
-2. **Get the code:** `git clone https://github.com/benkrasnow/ThermApp-webapp.git`, or download the ZIP from GitHub.
-3. **Serve it locally.** WebUSB only works on `https://` or `http://localhost`, so the page can't be opened as a file.
+2. **Quickest: use the hosted app.** Open **[https://benkrasnow.github.io/ThermApp-webapp/web/](https://benkrasnow.github.io/ThermApp-webapp/web/)** in Edge and skip to step 4. To run your own copy instead, get the code: `git clone https://github.com/benkrasnow/ThermApp-webapp.git`, or download the ZIP from GitHub.
+3. **Serve it locally** (own copy only). WebUSB needs a secure address (`https://`, or `http://localhost`), so the page can't be opened as a file.
    - **Easiest:** double-click **`serve.bat`**. It needs [Python 3](https://www.python.org/downloads/), starts a server on port 8765 and opens Edge.
    - **Or from any terminal:** run `python -m http.server 8765` in the repo folder, then open **http://localhost:8765/web/**.
 4. Click **Connect camera** and choose **USB2.0** in the browser's device picker.
@@ -61,11 +65,22 @@ Without these files the app still shows an image, but it's uncorrected and has n
 
 On Android, the app installs from Chrome as a **Progressive Web App (PWA)**. That gives you a home-screen icon that opens full-window like a normal app and **keeps working with no PC and no internet**. Once installed, you plug the camera in, tap the icon, and tap **Connect** if it doesn't connect by itself.
 
-The phone needs USB host (OTG) support, which most modern phones have. The camera plugs into the phone's USB port, and no driver is needed. The phone has to load the app once from a *secure* address: `https://…`, or `http://localhost`. There are two ways to do that.
+The phone needs USB host (OTG) support, which most modern phones have. The camera plugs into the phone's USB port, and no driver is needed. The phone loads the app once from a *secure* address, either `https://…` (the hosted app) or `http://localhost` (over debugging), and installs it from there.
 
-#### Option A (easiest): install over Android debugging
+#### Option A (easiest): install from the hosted app
 
-This uses the PC from step 2 to serve the app to the phone one time. `adb reverse` makes the PC's server appear as `localhost` on the phone, which Chrome treats as secure. Wireless debugging is recommended, because the camera can then be plugged into the phone during setup, and its calibration loads straight from the PC.
+1. **On the phone:** open **[https://benkrasnow.github.io/ThermApp-webapp/web/](https://benkrasnow.github.io/ThermApp-webapp/web/)** in Chrome.
+2. Tap **Install as an app**, or use Chrome's menu → **Install app**, and confirm. A **Therm-App** icon appears on the home screen. You can also just use the page in the browser tab, but the installed app opens full-window and works offline.
+3. **Calibration:** get your camera's calibration folder onto the phone, for example over a USB file transfer into **Download**. If the old Therm-App app ran on this same phone, it's already at `/sdcard/ThermApp/<serial>/`.
+4. Plug in the camera, launch the app, and tap **Connect** → **USB2.0** → allow. Then use **Settings → Calibration → Import calibration folder…**, or **Pick the files instead…** and select `0.bin`–`11.bin`. This is needed only once per camera. Importing on the phone hasn't been tested yet; if it gives you trouble, use Option B, where the calibration loads from the PC.
+
+The installed app updates itself whenever the phone is online and works offline otherwise. Calibration is never uploaded anywhere: it is read on the phone and stored in the app's local storage.
+
+To **host your own copy**, fork this repository and enable **Settings → Pages** (deploy from branch `main`, folder `/ (root)`). The app is then at `https://<your-user>.github.io/ThermApp-webapp/web/`. Netlify, Cloudflare Pages or any HTTPS server work the same way.
+
+#### Option B: install over Android debugging (no internet needed, or your own copy)
+
+Use this if you want to install your own copy of the code, or the phone has no internet. It uses the PC from step 2 to serve the app to the phone one time. `adb reverse` makes the PC's server appear as `localhost` on the phone, which Chrome treats as secure. Wireless debugging is recommended, because the camera can then be plugged into the phone during setup, and its calibration loads straight from the PC.
 
 1. **On the PC:** clone the repo, put your calibration folder in `calibration/<serial>/`, start the server (`serve.bat`, or `python -m http.server 8765`), and install [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb`).
 2. **On the phone:** enable **Developer options** by tapping **Settings → About phone → Build number** seven times. Then turn on **Developer options → Wireless debugging**, and note the IP address and port it shows. If the PC hasn't connected to this phone before, use **Pair device with pairing code** once and run `adb pair <ip>:<pairing-port>`.
@@ -83,16 +98,6 @@ This uses the PC from step 2 to serve the app to the phone one time. `adb revers
 You can use a USB cable instead of wireless debugging: turn on **USB debugging** and run `adb reverse` over the cable. The phone's port is then busy during setup, so copy the calibration files onto the phone first (`adb push calibration/<serial> /sdcard/Download/`), and after setup import them in the app (**Settings → Calibration → Pick the files instead…**, then select `0.bin`–`11.bin`).
 
 **To update** the installed app later: pull the latest code, run `adb reverse` again and open the app. It fetches the new files whenever the PC is reachable.
-
-#### Option B: install from an HTTPS website (no debugging)
-
-Any HTTPS host serving this repository works, and the phone then installs and updates the app directly from the web:
-
-1. **Host it.** The simplest is **GitHub Pages**: fork this repository, or use it directly. Then in **Settings → Pages**, choose **Deploy from a branch**, branch `main`, folder `/ (root)`. After a minute the app is at **`https://<github-user>.github.io/ThermApp-webapp/web/`**. Netlify, Cloudflare Pages or your own HTTPS server work the same way.
-2. **On the phone:** open that address in Chrome and tap **Install as an app**.
-3. **Calibration:** copy your camera's calibration folder onto the phone, for example over a USB file transfer into **Download**. If the old Therm-App app ran on this same phone, it's already at `/sdcard/ThermApp/<serial>/`. Plug in the camera, tap **Connect**, then use **Settings → Calibration → Import calibration folder…**, or **Pick the files instead…** and select `0.bin`–`11.bin`.
-
-A hosted copy updates itself whenever the phone is online and works offline otherwise. Calibration is never uploaded anywhere: it is read on the phone and stored in the app's local storage.
 
 #### How the installed app works
 
