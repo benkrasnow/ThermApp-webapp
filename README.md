@@ -2,6 +2,8 @@
 
 A browser app for the **Opgal Therm-App** USB thermal camera. It talks to the camera directly over **WebUSB**, applies the camera's own factory calibration, and shows live, radiometric thermal video in °C or °F. It runs in Chrome and Edge on Windows and Android, needs no Opgal software or native code, and installs nothing beyond a one-time USB driver on Windows.
 
+<img src="docs/images/therm-app-camera.jpg" width="400" alt="The Opgal Therm-App thermal camera: a small black module with an LWIR 6.8 mm f/1.4 lens, a phone clip and a micro-USB port">
+
 The original Android apps for this camera are no longer maintained, ship only 32-bit native code (so they don't run on 64-bit-only phones), and depended on an Opgal server for calibration downloads that no longer exists. This project reimplements everything from the USB protocol up.
 
 ## ▶ [Open the app: benkrasnow.github.io/ThermApp-webapp/web/](https://benkrasnow.github.io/ThermApp-webapp/web/)
