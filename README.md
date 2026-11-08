@@ -11,7 +11,7 @@ The original Android apps for this camera are no longer maintained, ship only 32
 | Platform | Browser | Notes |
 |---|---|---|
 | Windows 11 laptop | **Microsoft Edge 154.0.4258.53** | Needs the WinUSB driver (Zadig), installed once per PC |
-| Google Pixel 6, Android 16 | **Chrome 157.0.8103.38** | Camera on the phone's USB-C port (USB OTG) |
+| Google Pixel 6, Android 16 | **Chrome 157.0.8103.38** | Camera on the phone's USB-C port (USB OTG); installed as an app (PWA) over wireless debugging, runs without the PC |
 
 **Camera:** the original Therm-App (384×288, non-TH), hardware 4, firmware 118.
 
@@ -55,17 +55,53 @@ Without these files the app still shows an image, but it's uncorrected and has n
    - use **Calibration → Import calibration folder…** in the app.
 
    Either way it's then stored in the browser, so you only do this once.
+6. **Optional:** install it as a desktop app, using **Install as an app** in the app or Edge's address-bar install icon. That gives you a Start-menu entry, and it runs without `serve.bat` afterwards.
 
-### 3. Android (Chrome)
+### 3. Android (Chrome): install as an app
 
-The phone needs USB host (OTG) support, which most modern phones have, and the camera plugs into the phone's USB port. No driver is needed. The page must come from an `https://` address or from `localhost`:
+On Android, the app installs from Chrome as a **Progressive Web App (PWA)**. That gives you a home-screen icon that opens full-window like a normal app and **keeps working with no PC and no internet**. Once installed, you plug the camera in, tap the icon, and tap **Connect** if it doesn't connect by itself.
 
-- **From a hosted copy (recommended):** open the app's HTTPS address in Chrome, plug in the camera, tap **Connect**, choose **USB2.0** and allow Android's USB-permission prompt. Then import your calibration folder (**Settings → Calibration → Import**). Importing on the phone itself hasn't been tested yet; during testing the calibration was loaded from the PC, as below.
-  - To host it on GitHub Pages: in the repo's **Settings → Pages**, deploy from branch `main`, folder `/ (root)`. The app is then at `https://<user>.github.io/ThermApp-webapp/web/`.
-- **From a PC on the same Wi-Fi (development):**
-  1. Enable **Developer options → Wireless debugging** on the phone.
-  2. Run `adb connect <phone-ip>:<port>`, then `adb reverse tcp:8765 tcp:8765`.
-  3. Open `http://localhost:8765/web/` in the phone's Chrome. Calibration in the repo's `calibration/` folder then loads automatically.
+The phone needs USB host (OTG) support, which most modern phones have. The camera plugs into the phone's USB port, and no driver is needed. The phone has to load the app once from a *secure* address: `https://…`, or `http://localhost`. There are two ways to do that.
+
+#### Option A (easiest): install over Android debugging
+
+This uses the PC from step 2 to serve the app to the phone one time. `adb reverse` makes the PC's server appear as `localhost` on the phone, which Chrome treats as secure. Wireless debugging is recommended, because the camera can then be plugged into the phone during setup, and its calibration loads straight from the PC.
+
+1. **On the PC:** clone the repo, put your calibration folder in `calibration/<serial>/`, start the server (`serve.bat`, or `python -m http.server 8765`), and install [Android platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb`).
+2. **On the phone:** enable **Developer options** by tapping **Settings → About phone → Build number** seven times. Then turn on **Developer options → Wireless debugging**, and note the IP address and port it shows. If the PC hasn't connected to this phone before, use **Pair device with pairing code** once and run `adb pair <ip>:<pairing-port>`.
+3. **On the PC**, run:
+   ```bash
+   adb connect <phone-ip>:<port>
+   ```
+   ```bash
+   adb reverse tcp:8765 tcp:8765
+   ```
+4. **On the phone:** open **`http://localhost:8765/web/`** in Chrome and tap **Install as an app**, or use Chrome's menu → **Install app**. Confirm. A **Therm-App** icon appears on the home screen.
+5. Plug in the camera and launch the app from the icon. Tap **Connect**, choose **USB2.0** and allow Android's USB prompt. The app reads the camera's serial number and loads its calibration from the PC. From then on, the calibration is stored on the phone.
+6. **Done.** Turn off wireless debugging and unplug or close the PC; the app keeps working on its own.
+
+You can use a USB cable instead of wireless debugging: turn on **USB debugging** and run `adb reverse` over the cable. The phone's port is then busy during setup, so copy the calibration files onto the phone first (`adb push calibration/<serial> /sdcard/Download/`), and after setup import them in the app (**Settings → Calibration → Pick the files instead…**, then select `0.bin`–`11.bin`).
+
+**To update** the installed app later: pull the latest code, run `adb reverse` again and open the app. It fetches the new files whenever the PC is reachable.
+
+#### Option B: install from an HTTPS website (no debugging)
+
+Any HTTPS host serving this repository works, and the phone then installs and updates the app directly from the web:
+
+1. **Host it.** The simplest is **GitHub Pages**: fork this repository, or use it directly. Then in **Settings → Pages**, choose **Deploy from a branch**, branch `main`, folder `/ (root)`. After a minute the app is at **`https://<github-user>.github.io/ThermApp-webapp/web/`**. Netlify, Cloudflare Pages or your own HTTPS server work the same way.
+2. **On the phone:** open that address in Chrome and tap **Install as an app**.
+3. **Calibration:** copy your camera's calibration folder onto the phone, for example over a USB file transfer into **Download**. If the old Therm-App app ran on this same phone, it's already at `/sdcard/ThermApp/<serial>/`. Plug in the camera, tap **Connect**, then use **Settings → Calibration → Import calibration folder…**, or **Pick the files instead…** and select `0.bin`–`11.bin`.
+
+A hosted copy updates itself whenever the phone is online and works offline otherwise. Calibration is never uploaded anywhere: it is read on the phone and stored in the app's local storage.
+
+#### How the installed app works
+
+- **Manifest:** `web/manifest.webmanifest` gives the app its name, icon and standalone window. Chrome uses it to offer **Install**.
+- **Service worker:** `web/sw.js` copies every app file into the browser's cache at install time. Each later request tries the network first, with a 2.5-second timeout, and falls back to the cached copy. When the PC or website is reachable you get the latest version, and when it isn't, the app starts from the cache.
+- **Persistent storage:** the app asks the browser to keep its storage. That holds the cached app, the calibration, the dark frames and the settings, so Android shouldn't clear them under storage pressure. **Settings → App** shows whether this was granted.
+- **USB access:** Chrome remembers your permission for the camera. When the app starts with the camera attached, or the camera is plugged in while the app is open, it connects automatically. If Android has forgotten the permission (for example after replugging), tap **Connect** again.
+- **Uninstalling or clearing data:** uninstalling the app or clearing Chrome's data for the site can delete the stored calibration. Keep your own backup of the calibration folder.
+- **Limitation:** a web app can't make Android launch it automatically when the camera is plugged in, so you still tap the icon.
 
 If Android offers to open an old Therm-App app when you plug in the camera, dismiss it.
 
@@ -97,6 +133,7 @@ If Android offers to open an old Therm-App app when you plug in the camera, dism
   - the recording time and size badge isn't burned into the video.
 - **Layouts:** a desktop layout, plus automatic touch layouts for phones and tablets: a landscape camera view with a control rail and settings drawer, and portrait with tabs.
 - **Screen wake lock** while connected on phones, and while recording.
+- **Installable app (PWA):** a home-screen or desktop icon, a full-window app, and offline operation after one install. Updates arrive automatically when the source is reachable.
 
 ## Documentation
 
@@ -114,6 +151,7 @@ If Android offers to open an old Therm-App app when you plug in the camera, dism
 ```
 web/                 The app: plain ES modules, no build step (edit and reload)
   index.html, app.css
+  manifest.webmanifest, sw.js, icons/   Installable-app (PWA) manifest, offline service worker, icons
   js/                main, worker (USB + processing), usb, protocol, calibration,
                      processing, enhance (WebGL2), view, capture, palettes
   test/              golden.html (JS vs Python), video-quality.html, video-frames.html

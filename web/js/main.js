@@ -679,10 +679,13 @@ function initControls() {
   $("btn-snap").onclick = snapshot;
   $("btn-rec").onclick = toggleRecording;
   $("btn-import").onclick = () => $("file-import").click();
-  $("file-import").onchange = (e) => {
-    if (e.target.files.length) importCalibration(e.target.files);
-    e.target.value = "";
-  };
+  $("btn-import-files").onclick = () => $("file-import-files").click();
+  for (const id of ["file-import", "file-import-files"]) {
+    $(id).onchange = (e) => {
+      if (e.target.files.length) importCalibration(e.target.files);
+      e.target.value = "";
+    };
+  }
 
   canvas.addEventListener("click", (e) => {
     if (suppressSpotClick) { suppressSpotClick = false; return; }
@@ -909,5 +912,57 @@ function initTouchUi() {
   syncRail();
 }
 
+// ---- installable app (PWA): service worker for offline use, install button, persistent storage ----
+
+let installPrompt = null;
+const isInstalled = () => matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches;
+
+async function updateAppStatus() {
+  const parts = [];
+  parts.push(isInstalled() ? "Running as an installed app." : "Running in a browser tab.");
+  const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+  parts.push(reg && reg.active ? "Available offline." : "Not yet available offline.");
+  if (navigator.storage && navigator.storage.persisted) {
+    parts.push((await navigator.storage.persisted()) ? "Storage is persistent." : "Storage may be cleared by the browser if space runs low.");
+  }
+  $("app-status").textContent = parts.join(" ");
+  $("btn-install").hidden = $("btn-install-start").hidden = !installPrompt || isInstalled();
+  $("app-install-help").textContent = isInstalled() ? "" : installPrompt
+    ? "Install adds a home-screen icon that opens the app full-window, with or without a network connection."
+    : "To install, use the browser menu's “Install app” or “Add to Home screen”.";
+}
+
+async function initApp() {
+  // Ask the browser not to evict the cached app or the stored calibration and dark frames.
+  try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch { /* ignore */ }
+  if ("serviceWorker" in navigator) {
+    try {
+      await navigator.serviceWorker.register("sw.js");
+      navigator.serviceWorker.ready.then(updateAppStatus);
+    } catch (err) {
+      console.warn("Service worker registration failed:", err);
+    }
+  }
+  addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    updateAppStatus();
+  });
+  addEventListener("appinstalled", () => {
+    installPrompt = null;
+    flash("Installed. Start it from the home-screen icon.");
+    updateAppStatus();
+  });
+  $("btn-install").onclick = $("btn-install-start").onclick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null;
+    updateAppStatus();
+  };
+  updateAppStatus();
+}
+
 initControls();
 initTouchUi();
+initApp();

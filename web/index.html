@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Therm-App Web</title>
+<meta name="theme-color" content="#121212">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -24,6 +28,7 @@
       <div id="limit-hl" class="limit-hl" hidden></div>
       <div id="placeholder" class="placeholder">
         <p>Plug in the Therm-App and <span class="only-mouse">click</span><span class="only-touch">tap</span> <b>Connect</b>.</p>
+        <p><button id="btn-install-start" class="small" hidden>Install as an app</button></p>
         <p class="hint">Needs Chrome or Edge. On Windows the camera needs the WinUSB driver (Zadig), installed once per PC.</p>
       </div>
     </div>
@@ -179,9 +184,18 @@
       <summary>Calibration</summary>
       <p class="note" id="cal-status">No camera connected.</p>
       <button id="btn-import" class="small">Import calibration folder…</button>
+      <button id="btn-import-files" class="small">Pick the files instead…</button>
       <input id="file-import" type="file" webkitdirectory multiple hidden>
+      <input id="file-import-files" type="file" multiple hidden>
       <ul id="cal-list" class="cal-list"></ul>
-      <p class="note">Each camera has factory calibration files that the old Android app kept in <code>/sdcard/ThermApp/&lt;serial&gt;/</code>. Opgal's download server no longer exists, so import that folder once. It stays in this browser and is never uploaded.</p>
+      <p class="note">Each camera has factory calibration files that the old Android app kept in <code>/sdcard/ThermApp/&lt;serial&gt;/</code>. Opgal's download server no longer exists, so import that folder once. If folder selection doesn't work, connect the camera, tap "Pick the files instead", and select all of <code>0.bin</code>–<code>11.bin</code>. The calibration stays in this browser and is never uploaded.</p>
+    </details>
+
+    <details>
+      <summary>App</summary>
+      <p class="note top" id="app-status">Checking…</p>
+      <button id="btn-install" class="small" hidden>Install app</button>
+      <p class="note" id="app-install-help"></p>
     </details>
 
     <p class="keys dim only-mouse">Keys: Space snapshot · R record · P/Shift+P palette · M mirror · F flip · A auto/manual range · E enhancement</p>
