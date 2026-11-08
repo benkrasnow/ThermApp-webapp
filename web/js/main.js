@@ -50,6 +50,7 @@ let serial = 0;
 let calibrationSource = null; // "stored" | "local" | null
 let darkRecord = null;        // stored dark frame for the connected camera
 let darkCapturing = false;
+let needUsbPermission = false; // set after "Access denied": the next Connect goes through the device picker
 let activeLimit = null;        // touch: selected colour-bar limit, "hi" | "lo" | null
 let suppressSpotClick = false; // a label tap or a swipe shouldn't also move the spot
 let lastFrame = null;         // { header, image, raw, calibrated, vgsk }
@@ -105,7 +106,12 @@ worker.onmessage = (e) => {
       stats = m.stats;
       break;
     case "error":
-      setStatus("err", m.message);
+      if (m.name === "SecurityError" || /access denied/i.test(m.message)) {
+        needUsbPermission = true;
+        setStatus("err", "The camera needs permission again (Android forgets it when the camera is re-plugged). Tap Connect and choose USB2.0.");
+      } else {
+        setStatus("err", m.message);
+      }
       break;
   }
 };
@@ -123,7 +129,13 @@ async function connect() {
   }
   try {
     const permitted = await navigator.usb.getDevices();
-    if (!permitted.some(isThermApp)) await navigator.usb.requestDevice({ filters: [USB_FILTER] });
+    // Android forgets its own USB permission whenever the camera is re-plugged, even though the
+    // page still lists the device as permitted. Only Chrome's device picker (which needs a tap)
+    // asks Android again, so after an "Access denied" go through the picker.
+    if (!permitted.some(isThermApp) || needUsbPermission) {
+      await navigator.usb.requestDevice({ filters: [USB_FILTER] });
+      needUsbPermission = false;
+    }
     setStatus("wait", "Connecting…");
     worker.postMessage({ type: "connect" });
   } catch (err) {

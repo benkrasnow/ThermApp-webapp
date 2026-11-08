@@ -51,7 +51,7 @@ self.onmessage = async (e) => {
       case "dark-cancel": darkCapture = null; break;
     }
   } catch (err) {
-    post({ type: "error", message: String(err && err.message || err) });
+    post({ type: "error", name: err && err.name, message: String(err && err.message || err) });
   }
 };
 
@@ -65,7 +65,15 @@ async function connect() {
   config[W_VGSK] = vgsk.value;
   config[W_FRAME_RATE] = settings.frameRate;
   usb.setConfig(config);
-  await usb.open();
+  try {
+    await usb.open();
+  } catch (err) {
+    // Leave no half-open state behind, or later Connect attempts would be ignored.
+    const u = usb;
+    usb = null;
+    try { await u.device.close(); } catch { /* wasn't open */ }
+    throw err;
+  }
   announcedSerial = 0;
   pageReady = true;
   waiting = null;
