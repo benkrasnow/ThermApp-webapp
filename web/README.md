@@ -57,7 +57,7 @@ To test on a phone while the camera uses its USB port, use wireless debugging:
   - **Install:** pre-caches the 18 app files (`APP_FILES`) and activates immediately.
   - **Fetch:** network-first with a 2.5 s timeout for requests inside `web/`, caching each good response and falling back to the cache. Anything outside `web/` (such as the `../calibration/` lookups) isn't intercepted.
   - **Changing the file list:** add new files to `APP_FILES` and bump `CACHE`. Content changes need no bump, because network-first refreshes the cache.
-- **`main.js` (`initApp`):** registers the worker, calls `navigator.storage.persist()`, and turns `beforeinstallprompt` into **Install as an app** buttons (start screen and Settings → App).
+- **`main.js` (`initApp`):** registers the worker, calls `navigator.storage.persist()`, and turns `beforeinstallprompt` into the header's **⤓ Install app** button. It's hidden when running as the installed app (`display-mode: standalone`), and the listener is registered before any await so an early event isn't missed.
 - **Install origin:** `http://localhost` is a secure context. An install made over `adb reverse tcp:8765 tcp:8765` is a normal PWA whose origin is `localhost:8765`, and it runs from the cache once the PC is gone. Verified by stopping the server and reloading: the page, styles, all modules and the camera worker load from the cache.
 
 ## Temperatures

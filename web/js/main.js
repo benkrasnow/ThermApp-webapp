@@ -923,50 +923,42 @@ function initTouchUi() {
 let installPrompt = null;
 const isInstalled = () => matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches;
 
-async function updateAppStatus() {
-  const parts = [];
-  parts.push(isInstalled() ? "Running as an installed app." : "Running in a browser tab.");
-  const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
-  parts.push(reg && reg.active ? "Available offline." : "Not yet available offline.");
-  if (navigator.storage && navigator.storage.persisted) {
-    parts.push((await navigator.storage.persisted()) ? "Storage is persistent." : "Storage may be cleared by the browser if space runs low.");
-  }
-  $("app-status").textContent = parts.join(" ");
-  $("btn-install").hidden = $("btn-install-start").hidden = !installPrompt || isInstalled();
-  $("app-install-help").textContent = isInstalled() ? "" : installPrompt
-    ? "Install adds a home-screen icon that opens the app full-window, with or without a network connection."
-    : "To install, use the browser menu's “Install app” or “Add to Home screen”.";
+/** The header's Install button: only when the browser offers installation and we're not already the installed app. */
+function updateInstallButton() {
+  $("btn-install").hidden = !installPrompt || isInstalled();
 }
 
 async function initApp() {
+  // Listen first: Chrome may announce installability before the awaits below finish.
+  addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    updateInstallButton();
+  });
+  addEventListener("appinstalled", () => {
+    installPrompt = null;
+    flash("Installed. Start it from the home-screen icon.");
+    updateInstallButton();
+  });
+  $("btn-install").onclick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null;
+    updateInstallButton();
+  };
+  matchMedia("(display-mode: standalone)").addEventListener("change", updateInstallButton);
+  updateInstallButton();
+
   // Ask the browser not to evict the cached app or the stored calibration and dark frames.
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch { /* ignore */ }
   if ("serviceWorker" in navigator) {
     try {
       await navigator.serviceWorker.register("sw.js");
-      navigator.serviceWorker.ready.then(updateAppStatus);
     } catch (err) {
       console.warn("Service worker registration failed:", err);
     }
   }
-  addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault();
-    installPrompt = e;
-    updateAppStatus();
-  });
-  addEventListener("appinstalled", () => {
-    installPrompt = null;
-    flash("Installed. Start it from the home-screen icon.");
-    updateAppStatus();
-  });
-  $("btn-install").onclick = $("btn-install-start").onclick = async () => {
-    if (!installPrompt) return;
-    installPrompt.prompt();
-    await installPrompt.userChoice;
-    installPrompt = null;
-    updateAppStatus();
-  };
-  updateAppStatus();
 }
 
 initControls();

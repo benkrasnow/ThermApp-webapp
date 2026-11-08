@@ -195,3 +195,9 @@ html.touch .rail { display: flex; align-items: center; gap: 8px; }
 /* Selected colour-bar limit (touch): an HTML outline over the canvas label, so it's never recorded. */
 .limit-hl { position: absolute; z-index: 3; pointer-events: none; border: 2px solid var(--accent); border-radius: 6px; background: rgba(255, 122, 61, 0.22); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5); }
 .limit-hl::after { content: "↕"; position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%); color: var(--accent); font-weight: 700; text-shadow: 0 0 3px #000; }
+
+/* Header install button (shown only when the browser offers installation) */
+#btn-install { white-space: nowrap; }
+@media (orientation: landscape) {
+  html.touch .topbar #btn-install { pointer-events: auto; min-height: 36px; padding: 4px 12px; font-size: 13px; background: rgba(0, 0, 0, 0.6); border-color: rgba(255, 255, 255, 0.25); color: #fff; }
+}
