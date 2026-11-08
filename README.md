@@ -115,7 +115,13 @@ You can use a USB cable instead of wireless debugging: turn on **USB debugging**
 - **Uninstalling or clearing data:** uninstalling the app or clearing Chrome's data for the site can delete the stored calibration. Keep your own backup of the calibration folder.
 - **Limitation:** a web app can't make Android launch it automatically when the camera is plugged in, so you still tap the icon.
 
-If Android offers to open an old Therm-App app when you plug in the camera, dismiss it.
+**If you used an old Therm-App app on this phone:** Android may have it saved as the default app for the camera. Then every time you plug the camera in, Android opens that app and gives the camera only to it, and this app gets **"Access denied"** with no permission popup. Swiping the old app away doesn't help. Clear the default once:
+1. Go to **Settings → Apps → ThermAppPlus** (or the old Therm-App app).
+2. Tap **Open by default → Clear default preferences**.
+3. Re-plug the camera; if Android asks which app to open, dismiss it.
+4. In this app, tap **Connect**, choose **USB2.0**, and allow access.
+
+Uninstalling the old app also works. Your calibration folder in `/sdcard/ThermApp/` stays, but back it up first anyway.
 
 ---
 

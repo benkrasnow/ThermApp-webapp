@@ -108,7 +108,7 @@ worker.onmessage = (e) => {
     case "error":
       if (m.name === "SecurityError" || /access denied/i.test(m.message)) {
         needUsbPermission = true;
-        setStatus("err", "The camera needs permission again (Android forgets it when the camera is re-plugged). Tap Connect and choose USB2.0.");
+        setStatus("err", "Android hasn't given this app access to the camera. Tap Connect and choose USB2.0. If an old Therm-App app opens whenever you plug the camera in, clear its default first: Settings → Apps → that app → Open by default → Clear.");
       } else {
         setStatus("err", m.message);
       }
