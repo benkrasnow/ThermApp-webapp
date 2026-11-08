@@ -15,7 +15,7 @@ Open the link in **Chrome** (Android or desktop) or **Edge** (Windows), plug in 
 | Platform | Browser | Notes |
 |---|---|---|
 | Windows 11 laptop | **Microsoft Edge 154.0.4258.53** | Needs the WinUSB driver (Zadig), installed once per PC |
-| Google Pixel 6, Android 16 | **Chrome 157.0.8103.38** | Camera on the phone's USB-C port (USB OTG); installed as an app (PWA) over wireless debugging, runs without the PC |
+| Google Pixel 6, Android 16 | **Chrome 157.0.8103.38** | Camera on the phone's USB-C port (USB OTG); installed as an app (PWA) both from the hosted site and over wireless debugging; runs without the PC; calibration folder imported on the phone |
 
 **Camera:** the original Therm-App (384×288, non-TH), hardware 4, firmware 118.
 
@@ -72,7 +72,7 @@ The phone needs USB host (OTG) support, which most modern phones have. The camer
 1. **On the phone:** open **[https://benkrasnow.github.io/ThermApp-webapp/web/](https://benkrasnow.github.io/ThermApp-webapp/web/)** in Chrome.
 2. Tap **Install as an app**, or use Chrome's menu → **Install app**, and confirm. A **Therm-App** icon appears on the home screen. You can also just use the page in the browser tab, but the installed app opens full-window and works offline.
 3. **Calibration:** get your camera's calibration folder onto the phone, for example over a USB file transfer into **Download**. If the old Therm-App app ran on this same phone, it's already at `/sdcard/ThermApp/<serial>/`.
-4. Plug in the camera, launch the app, and tap **Connect** → **USB2.0** → allow. Then use **Settings → Calibration → Import calibration folder…**, or **Pick the files instead…** and select `0.bin`–`11.bin`. This is needed only once per camera. Importing on the phone hasn't been tested yet; if it gives you trouble, use Option B, where the calibration loads from the PC.
+4. Plug in the camera, launch the app, and tap **Connect** → **USB2.0** → allow. Then use **Settings → Calibration → Import calibration folder…**, or **Pick the files instead…** and select `0.bin`–`11.bin`. This is needed only once per camera. Tested on the Pixel 6: Chrome's folder picker asks permission to "upload" the files, but they are only read inside the app.
 
 The installed app updates itself whenever the phone is online and works offline otherwise. Calibration is never uploaded anywhere: it is read on the phone and stored in the app's local storage.
 
