@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<palette version="1.0">
+    <labels>
+        <label>white hot</label>
+        <label code="de">Weiß warm</label>
+        <label code="es">blanco termal</label>
+        <label code="fr">blanc chaud</label>
+        <label code="no">hvit varmt</label>
+    </labels>
+    <colors>
+        <color step="0">#000000</color>
+        <color step="64">#404040</color>
+        <color step="128">#808080</color>
+        <color step="192">#c0c0c0</color>
+        <color step="256">#ffffff</color>
+    </colors>
+<hotspot>#00ff00</hotspot>
+</palette>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video recording quality test</title>
+<style>body { font: 13px/1.5 ui-monospace, monospace; padding: 12px; background: #fff; color: #111; } canvas { display: none; }</style>
+</head>
+<body>
+<h1>Recording quality vs bitrate</h1>
+<p>Renders the saved lamp frame through the real renderer with per-frame noise and a slow pan, records it with MediaRecorder, decodes it, and compares against the exact source frames (PSNR over the image, overlays off).</p>
+<pre id="out">running…</pre>
+<canvas id="c" width="1152" height="864"></canvas>
+<script type="module">
+import { applyNuc, fillBadPixels } from "../js/processing.js";
+import { calibrationMaps, fetchCalibration } from "../js/calibration.js";
+import { framePixels, parseHeader, PIXELS } from "../js/protocol.js";
+import { Agc, Renderer } from "../js/view.js";
+import { PALETTES } from "../js/palettes.js";
+import { estimateNoise } from "../js/enhance.js";
+
+const out = document.getElementById("out");
+const log = (s) => { out.textContent = (out.textContent === "running…" ? "" : out.textContent) + s + "\n"; };
+const params = new URLSearchParams(location.search);
+const SCALE = Number(params.get("scale") || 3), FPS = 26, SECONDS = Number(params.get("secs") || 4);
+const BITRATES = (params.get("rates") || "8,20,40").split(",").map(Number);
+const TYPES = ["video/mp4;codecs=avc1.640028", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=av01"];
+
+log("supported: " + TYPES.map((t) => `${t}=${MediaRecorder.isTypeSupported(t)}`).join("  "));
+const files = await fetchCalibration("../../calibration/215324084/");
+const maps = calibrationMaps(files);
+const raw = await (await fetch("../../prototype/captures/vgsk_1520.raw")).arrayBuffer();
+const h = parseHeader(raw);
+const base = applyNuc(framePixels(raw), h.tfpa, h.vgsk, maps, new Float32Array(PIXELS));
+const isBad = new Uint8Array(PIXELS); for (const i of maps.badPixels) isBad[i] = 1;
+fillBadPixels(base, maps.badPixels, isBad);
+
+// Deterministic frame k: base scene panned by k/8 px horizontally plus 0.09 °C Gaussian noise.
+const STATIC = params.get("static") === "1";
+function sceneFrame(k) {
+  if (STATIC) return base;
+  let s = (k + 1) * 2654435761 >>> 0;
+  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const img = new Float32Array(PIXELS), shift = (k / 8) % 40;
+  for (let y = 0; y < 288; y++) for (let x = 0; x < 384; x++) {
+    const sx = Math.min(383, x + shift), x0 = Math.floor(sx), f = sx - x0, x1 = Math.min(383, x0 + 1);
+    const v = base[y * 384 + x0] * (1 - f) + base[y * 384 + x1] * f;
+    const g = Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+    img[y * 384 + x] = v + 9 * g;
+  }
+  return img;
+}
+
+const canvas = document.getElementById("c");
+const r = new Renderer(canvas);
+r.setPalette(PALETTES[3].stops);
+r.overlays = { spot: false, extremes: false, colorbar: false };
+r.enhance.scale = SCALE;
+const agc = new Agc(); agc.update(base); const lo = agc.lo, hi = agc.hi;
+const noise = estimateNoise(sceneFrame(0), 384, 288);
+const drawFrame = (k) => r.draw(sceneFrame(k), lo, hi, { unitScale: 0.01, noise });
+drawFrame(0);
+log(`canvas ${canvas.width}x${canvas.height}, ${FPS} fps, ${SECONDS} s per run`);
+
+// Reference pixels for frame k (rendered on demand into a scratch canvas).
+const refCanvas = document.createElement("canvas"); refCanvas.width = canvas.width; refCanvas.height = canvas.height;
+const ref = new Renderer(refCanvas); ref.setPalette(PALETTES[3].stops); ref.overlays = r.overlays; ref.enhance.scale = SCALE;
+function refPixels(k) { ref.draw(sceneFrame(k), lo, hi, { unitScale: 0.01, noise }); return refCanvas.getContext("2d").getImageData(0, 0, refCanvas.width, refCanvas.height).data; }
+function psnr(a, b) { let se = 0, n = 0; for (let i = 0; i < a.length; i += 4) for (let c = 0; c < 3; c++) { const d = a[i + c] - b[i + c]; se += d * d; n++; } return 10 * Math.log10(255 * 255 / (se / n)); }
+const luma = (p, i) => 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+function analyse(got, want) {
+  const bias = [0, 0, 0]; let se = 0, n = 0, lo = [255, 255, 255], loW = [255, 255, 255], hiG = [0, 0, 0], hiW = [0, 0, 0];
+  for (let i = 0; i < got.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      bias[c] += got[i + c] - want[i + c];
+      lo[c] = Math.min(lo[c], got[i + c]); loW[c] = Math.min(loW[c], want[i + c]);
+      hiG[c] = Math.max(hiG[c], got[i + c]); hiW[c] = Math.max(hiW[c], want[i + c]);
+    }
+    const d = luma(got, i) - luma(want, i); se += d * d; n++;
+  }
+  return { bias: bias.map((b) => (b / n).toFixed(1)).join("/"), lumaPsnr: (10 * Math.log10(255 * 255 / (se / n))).toFixed(2),
+    range: `got min ${lo.join(",")} max ${hiG.join(",")} vs source min ${loW.join(",")} max ${hiW.join(",")}` };
+}
+
+async function record(type, mbps) {
+  const stream = canvas.captureStream(0);
+  const track = stream.getVideoTracks()[0];
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: mbps * 1e6 });
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((res) => (rec.onstop = res));
+  rec.start(1000);
+  const total = FPS * SECONDS, t0 = performance.now();
+  for (let k = 0; k < total; k++) {
+    drawFrame(k);
+    track.requestFrame();
+    const wait = t0 + (k + 1) * 1000 / FPS - performance.now();
+    if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+  }
+  rec.stop();
+  await done;
+  return new Blob(chunks, { type });
+}
+
+async function measure(blob) {
+  const v = document.createElement("video");
+  v.muted = true; v.src = URL.createObjectURL(blob);
+  await new Promise((res) => (v.onloadeddata = res));
+  const vc = document.createElement("canvas"); vc.width = canvas.width; vc.height = canvas.height;
+  const vx = vc.getContext("2d", { willReadFrequently: true });
+  const scores = [];
+  for (const t of [0.8, 1.6, 2.4, 3.2].filter((t) => t < SECONDS - 0.3)) {
+    v.currentTime = t;
+    await new Promise((res) => (v.onseeked = res));
+    vx.drawImage(v, 0, 0, vc.width, vc.height);
+    const got = vx.getImageData(0, 0, vc.width, vc.height).data;
+    // Frame timing in the file is approximate: take the best match among nearby source frames.
+    const k0 = Math.round(t * FPS);
+    let best = 0, bestK = k0;
+    for (let k = k0 - 3; k <= k0 + 3; k++) { const p = psnr(got, refPixels(k)); if (p > best) { best = p; bestK = k; } }
+    scores.push(best);
+    if (scores.length === 1) measure.detail = analyse(got, refPixels(bestK));
+  }
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+
+const type = params.get("type") || TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+log(`recording as ${type}`);
+for (const mbps of BITRATES) {
+  const blob = await record(type, mbps);
+  const actual = blob.size * 8 / SECONDS / 1e6;
+  const q = await measure(blob);
+  log(`requested ${mbps} Mbps → actual ${actual.toFixed(1)} Mbps, ${(blob.size / 1e6).toFixed(1)} MB, PSNR ${q.toFixed(2)} dB, ${(actual * 3600 / 8 / 1000).toFixed(1)} GB/hour`);
+  const d = measure.detail;
+  log(`    RGB bias ${d.bias}, luma PSNR ${d.lumaPsnr} dB, ${d.range}`);
+}
+log("done");
+document.title = "done";
+</script>
+</body>
+</html>

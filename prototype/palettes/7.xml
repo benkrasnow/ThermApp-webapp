@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<palette version="1.0">
+    <labels>
+        <label>green</label>
+        <label code="de">Grün</label>
+        <label code="es">verde</label>
+        <label code="fr">vert</label>
+        <label code="no">grønn</label>
+    </labels>
+    <colors>
+        <color step="0">#000000</color>
+        <color step="64">#004400</color>
+        <color step="128">#008800</color>
+        <color step="192">#00cc00</color>
+        <color step="256">#00ff00</color>
+    </colors>
+    <hotspot>#ffffff</hotspot>
+</palette>

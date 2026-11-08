@@ -1,0 +1,123 @@
+# Therm-App Web
+
+This is a browser app for the Opgal Therm-App, built on WebUSB. It runs in Chrome and Edge, on desktop and on Android.
+
+It uses plain ES modules with no build step: edit a file and reload the page.
+
+## Run locally
+
+Double-click `serve.bat` in the project root. It serves the project at `http://localhost:8765` and opens `http://localhost:8765/web/` in Edge. WebUSB only works on `localhost` or `https`, so opening `index.html` as a file won't work.
+
+When served from the project folder, the app picks up `calibration/<serial>/` automatically and copies it into the browser's storage. Anywhere else, use **Calibration → Import calibration folder…**.
+
+## Layout
+
+| File | Role |
+|---|---|
+| `index.html`, `app.css` | UI |
+| `js/main.js` | Page controller: settings, calibration lookup, capture, worker bridge |
+| `js/worker.js` | Owns the USB device. Per frame it runs NUC, bad-pixel fill, the VGSK bias loop and the noise filter. |
+| `js/usb.js` | WebUSB transport and frame sync |
+| `js/protocol.js` | Constants, config header from `11.bin`, frame header parsing |
+| `js/calibration.js` | Calibration file checks, coefficient maps, IndexedDB store |
+| `js/processing.js` | NUC polynomial, bad pixels, `VgskController`, `TemporalFilter` |
+| `js/view.js` | AGC, palette LUTs, renderer and overlays |
+| `js/capture.js` | Output folder (File System Access API), PNG, float TIFF and raw stills, MediaRecorder video |
+| `js/palettes.js` | Generated from the original app's palette XML |
+
+## Touch layout (phones and tablets)
+
+`html.touch` is set when `(pointer: coarse) and (hover: none)` matches. Use `?ui=touch` or `?ui=desktop` to force either layout for testing. Desktop CSS is untouched; all touch rules are scoped under `html.touch` in `app.css`.
+
+- **Landscape:** a full-height image with the readouts overlaid at the bottom, and a control rail on the right: Connect/Disconnect, Snapshot, Record, palette, Auto/Manual, Settings and full screen. Settings open as a drawer beside the rail; tap outside the drawer to close it.
+- **Portrait:** the image, the same controls as a row, the readouts, then the settings as tabs.
+- **Touch details:**
+  - Each settings section becomes a tab (`buildTabs`).
+  - The min/max − / + steppers repeat while held.
+  - Targets are at least 44 px, and double-tap zoom is off.
+  - Keyboard hints are hidden (`.only-mouse`).
+- **Wake lock:** held while connected on touch devices, and while recording on any device.
+- **Colour-bar limits:**
+  - Tapping the max or min label on the colour bar selects it and switches to Manual. Manual starts from the current auto range, so nothing jumps.
+  - A vertical swipe anywhere on the image then adjusts the selected limit, in 0.1° steps. Sensitivity is fixed per swipe: the full image height equals the span at the start.
+  - **Auto** clears the selection.
+  - **Hit areas:** the renderer reports the label positions (`Renderer.colorbarRects`), and tap targets are padded to at least 48 px.
+  - **Highlight:** an HTML element over the canvas (`#limit-hl`), so it isn't recorded.
+  - **In portrait,** page scrolling is disabled on the image while a limit is selected.
+
+To test on a phone while the camera uses its USB port, use wireless debugging:
+1. `adb connect <phone-ip:port>`
+2. `adb reverse tcp:8765 tcp:8765`
+3. Open `http://localhost:8765/web/` in the phone's Chrome. `localhost` counts as a secure origin, so WebUSB works.
+
+## Temperatures
+
+Corrected image values are hundredths of a degree Celsius; see `calibration/README.md`. All values stay in that unit internally, and conversion to °C/°F happens only for display (`makeUnits` in `view.js`). The manual range is stored in image units, so switching units never moves it. TIFF stills are written in °C.
+
+Accuracy depends on the VGSK loop matching Opgal's exactly, so it's a direct port of the native `Func1`.
+
+## Dark frame
+
+The user covers the lens with something uniform and clicks Capture.
+- **Capture:** the worker averages 16, 32 or 64 corrected, bad-pixel-filled frames (`DarkFrameAccumulator`).
+- **The map:** it stores the average **minus its own mean**. Subtracting this zero-mean map removes per-pixel offsets and gradients without changing the absolute temperature level.
+- **When it applies:** after NUC and bad-pixel fill, before the noise filter, and only when NUC is on.
+- **Storage:** maps are kept per camera serial in IndexedDB (`darkStore`), together with the capture time, Tfpa and VGSK.
+
+Gradients drift as the camera body warms or cools, so the map needs recapturing after big environment changes.
+
+## Display enhancement (`js/enhance.js`, WebGL2)
+
+This stage only changes what is displayed and recorded. The spot, min/max, colour bar and TIFF all use the unenhanced temperatures. One frame takes about 1.2–1.5 ms on the GPU, at any output scale up to 4×.
+
+1. **Upload:** temperatures go up in °C, centred on the display range, as R32F. Centring keeps the float32 variance maths (E[x²] − E[x]²) precise.
+2. **Denoise:** a self-guided filter (He et al.) with a 5×5 window and `eps = (strength · σ)²`.
+   - σ is a per-frame robust noise estimate (`estimateNoise`: the MAD of a 4-neighbour high-pass), so "1.5σ" means the same thing with or without the temporal filter.
+   - Steps much larger than σ are kept; flat areas are smoothed.
+3. **Detail (DDE-style):** a second guided filter, 13×13 with `eps = (0.12 · display span)²`, splits the denoised image into base and detail layers. Strong edges stay in the base layer, so there are no halos.
+   - The detail layer is boosted by `1 + (gain − 1) · E/(E + σ²)`, where E is the 3×3 detail energy.
+   - The boost fades out where detail is at the noise floor, so grain isn't amplified.
+4. **Upsample:** 2×, 3× or 4×, with nearest, bilinear, bicubic (Catmull-Rom) or Lanczos-3. Bicubic and Lanczos are clamped to the nearest four samples to prevent ringing. This runs on temperatures before the palette, so colour transitions stay smooth.
+5. **Map:** AGC, then the palette LUT, then mirror/flip, all in one pass. The 2D canvas then draws the overlays on top.
+
+The filter passes need `EXT_color_buffer_float`. Without it, only upsampling is available, and without WebGL2 the old 2D path is used.
+
+The worker also smooths T_fpa (EMA, α = 0.04, about 1 s) before the NUC. T_fpa jitters by 1–2 counts per frame, which made the whole frame flicker by about 0.04 °C; smoothing brings that to about 0.01 °C.
+
+Measured on this camera: per-pixel temporal noise is about 0.09 °C (NETD), the fixed pattern without a dark frame about 0.11 °C, and the column pattern about 0.03 °C.
+
+## Video recording
+
+`MediaRecorder` records the display canvas (after enhancement and overlays).
+
+**Frames are pushed explicitly:** `captureStream(0)`, then `track.requestFrame()` after each draw. The file therefore has one frame per camera frame, with real timestamps; this tested at 0 of 208 missing at 3× and 0 of 130 at 4×. The old `captureStream(25)` sampled on a timer and dropped every 26th frame of the 25.98 fps sensor. While recording, the badge counts camera frames that never reached the canvas (lost on USB, or skipped while the page was busy). MediaRecorder doesn't report encoder-side drops, so those can't be shown. Measured with `test/video-quality.html` in Chromium on this PC:
+
+| Path | Static frame | Noisy, moving thermal video |
+|---|---|---|
+| H.264 (any profile, MP4 or MKV) | 26.6 dB, colour bias about +15 G / +6 R | ~27 dB at 4–40 Mbps; bitrate doesn't help |
+| VP9 (MP4 or WebM) | 47 dB, bias ≤ 2 | 35–37.6 dB at 3×, 37–40 dB at 4× |
+| AV1 (MP4 or WebM) | 44 dB | not measured; heavier to encode |
+
+So the default is **VP9 in MP4**. The requested bitrate is `pixels × fps × bpp`, with bpp 0.4, 1.15 or 2.3 for Standard, High or Maximum. VP9 typically uses about half of the request on thermal video. At High:
+- 3× uses about 10–15 Mbps, roughly 5–7 GB/hour.
+- 4× uses about 24 Mbps, roughly 11 GB/hour.
+
+**Recording length:**
+- **With a Save folder:** chunks stream to the file every second. Chrome writes to a temporary `.crswap` file and renames it on Stop, so length is limited by free disk space, not memory. A crash or sleep before Stop leaves the recording unfinished.
+- **Without a folder:** chunks stay in memory until Stop, so long recordings risk memory pressure and the app warns about it.
+
+## Tests
+
+`test/video-frames.html?mode=app&scale=3` checks frame continuity. It draws the frame number into each frame as blocks, records through `VideoRecorder`, then seeks through the file decoding every frame. `mode=rate&rate=25` reproduces the old timer-sampled capture, which dropped 1 frame in 26.
+
+`test/video-quality.html?scale=3&rates=8,30&type=video/mp4;codecs=vp9` measures recording fidelity (PSNR against the exact source frames). Add `static=1` to measure colour accuracy alone.
+
+Open `http://localhost:8765/web/test/golden.html`. It checks the JS port against the Python prototype's outputs for the saved captures; NUC must match to below 0.5 counts. To regenerate the references, run `.venv\Scripts\python web\test\make_refs.py`.
+
+## Data flow
+
+1. The worker reads USB in 64 KB chunks. A frame is an exact multiple of the 512-byte packet size, so large reads would only complete when full and would deliver frames in pairs.
+2. The worker processes every frame. If the page is still drawing, the newest frame waits and replaces any older waiting one. Latency stays at most one frame, and the readout's "skipped" count shows any frames the display couldn't keep up with.
+3. The worker posts a `Float32Array` image and the raw frame to the page, as transferables.
+4. The page runs AGC, then the palette, then the overlays, all on a 1152×864 canvas. Stills and video are taken from that canvas.
+5. The page sends an `ack` back to the worker.

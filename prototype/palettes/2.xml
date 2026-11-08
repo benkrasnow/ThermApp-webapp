@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<palette version="1.0">
+    <labels>
+        <label>rainbow</label>
+        <label code="de">Regenbogen</label>
+        <label code="es">arco iris</label>
+        <label code="fr">arc-en-ciel</label>
+        <label code="no">regnbue</label>
+    </labels>
+    <colors>
+        <color step="0">#000000</color>
+        <color step="52">#ff0000</color>
+        <color step="104">#ffff00</color>
+        <color step="156">#00ffff</color>
+        <color step="208">#0000ff</color>
+        <color step="256">#ffffff</color>
+    </colors>
+    <hotspot>#00ff00</hotspot>
+</palette>

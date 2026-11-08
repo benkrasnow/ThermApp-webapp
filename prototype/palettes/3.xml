@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<palette version="1.0">
+    <labels>
+        <label>iron</label>
+        <label code="de">Eisen</label>
+        <label code="es">hierro</label>
+        <label code="fr">fer</label>
+        <label code="no">stryke</label>
+    </labels>
+    <colors>
+        <color step="0">#000000</color>
+        <color step="52">#960045</color>
+        <color step="104">#8513CA</color>
+        <color step="156">#026af1</color>
+        <color step="220">#00ffff</color>
+        <color step="256">#ffffff</color>
+    </colors>
+    <hotspot>#00ff00</hotspot>
+</palette>

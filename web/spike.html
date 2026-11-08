@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Therm-App WebUSB spike</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f4f2; --fg: #1d1d1b; --muted: #6b6b66; --accent: #c4501b; --panel: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ecece8; --muted: #9a9a94; --accent: #ff7a3d; --panel: #222220; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--muted); max-width: 70ch; }
+  button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  canvas { display: block; width: 100%; max-width: 768px; aspect-ratio: 4 / 3; margin: 12px 0; background: #000; image-rendering: pixelated; }
+  #stats { font: 13px/1.6 ui-monospace, monospace; background: var(--panel); padding: 8px 12px; border-radius: 6px; max-width: 744px; white-space: pre-wrap; }
+  .err { color: #d33; }
+</style>
+</head>
+<body>
+<h1>Therm-App WebUSB spike</h1>
+<p>Checks that this browser can open the camera and keep up with its 25 fps stream. The image is uncalibrated: it shows raw sensor counts with a simple contrast stretch. Close any other program using the camera first, including ThermAppViewer.exe.</p>
+<button id="connect">Connect camera</button>
+<button id="disconnect" disabled>Disconnect</button>
+<canvas id="view" width="384" height="288"></canvas>
+<div id="stats">Not connected.</div>
+
+<script>
+"use strict";
+const VID = 0x1772, PID = 0x0002, EP_OUT = 2, EP_IN = 1;
+const W = 384, H = 288, HEADER = 64, FRAME = 221696;
+const MAGIC = [0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xd5, 0xa5];
+const READ_SIZE = 16384 * 16, IN_FLIGHT = 3;
+// SDK default configuration (thermapp.sdk.p); word 4 = 2 streams video, word 18 = VGSK bias.
+const config = new Uint16Array([0xA5A5, 0xA5A5, 0xA5A5, 0xA5D5, 2, 0, 0, 0, 0, 288, 384, 288, 384, 25, 0, 0,
+  1884, 2949, 1520, 2048, 2949, 2949, 0, 1392, 2949, 64, 0, 0, 80, 3, 0, 4095]);
+
+const $ = (id) => document.getElementById(id);
+const ctx = $("view").getContext("2d");
+const img = ctx.createImageData(W, H);
+let dev = null, running = false;
+const stats = { frames: 0, dropped: 0, bytes: 0, t0: 0, serial: 0, tfpa: 0, vgsk: 0, lo: 0, hi: 0, fps: 0 };
+
+// Growable byte buffer for frame sync across USB transfer boundaries.
+let buf = new Uint8Array(FRAME * 4), len = 0;
+
+function append(view) {
+  if (len + view.byteLength > buf.length) {
+    const bigger = new Uint8Array((len + view.byteLength) * 2);
+    bigger.set(buf.subarray(0, len));
+    buf = bigger;
+  }
+  buf.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength), len);
+  len += view.byteLength;
+}
+
+function findMagic(from) {
+  outer: for (let i = from; i + MAGIC.length <= len; i++) {
+    for (let k = 0; k < MAGIC.length; k++) if (buf[i + k] !== MAGIC[k]) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+function consume(n) { buf.copyWithin(0, n, len); len -= n; }
+
+function extractFrames() {
+  for (;;) {
+    const start = findMagic(0);
+    if (start < 0) { if (len > 8) consume(len - 8); return; }
+    if (start > 0) consume(start);
+    if (len < FRAME) return;
+    if (len >= FRAME + 4 && !(buf[FRAME] === 0xa5 && buf[FRAME + 1] === 0xa5 && buf[FRAME + 2] === 0xa5 && buf[FRAME + 3] === 0xa5)) {
+      stats.dropped++; consume(8); continue;
+    }
+    onFrame(buf.slice(0, FRAME));
+    consume(FRAME);
+  }
+}
+
+let lastDraw = 0;
+function onFrame(frame) {
+  stats.frames++;
+  const dv = new DataView(frame.buffer);
+  stats.serial = dv.getUint32(10, true);
+  stats.tfpa = dv.getUint16(30, true);
+  stats.vgsk = dv.getUint16(36, true);
+  const now = performance.now();
+  if (now - lastDraw < 30) return;  // draw at most ~30 Hz
+  lastDraw = now;
+  const px = new Int16Array(frame.buffer, HEADER, W * H);
+  // Contrast stretch from a sparse sample, ignoring the outer border.
+  let lo = 32767, hi = -32768;
+  for (let y = 8; y < H - 8; y += 3) for (let x = 8; x < W - 8; x += 3) {
+    const v = px[y * W + x]; if (v < lo) lo = v; if (v > hi) hi = v;
+  }
+  stats.lo = lo; stats.hi = hi;
+  const scale = 255 / Math.max(hi - lo, 1), d = img.data;
+  for (let i = 0; i < W * H; i++) {
+    const g = Math.max(0, Math.min(255, (px[i] - lo) * scale));
+    d[4 * i] = d[4 * i + 1] = d[4 * i + 2] = g; d[4 * i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+async function sendConfig() { await dev.transferOut(EP_OUT, config); }
+
+async function reader() {
+  // Keep several bulk reads queued so the camera's FIFO never stalls.
+  const pending = [];
+  for (let i = 0; i < IN_FLIGHT; i++) pending.push(dev.transferIn(EP_IN, READ_SIZE));
+  let lastCfg = 0;
+  while (running) {
+    const r = await pending.shift();
+    if (running) pending.push(dev.transferIn(EP_IN, READ_SIZE));
+    if (r.status === "ok" && r.data.byteLength) { stats.bytes += r.data.byteLength; append(r.data); extractFrames(); }
+    const now = performance.now();
+    if (now - lastCfg > 50) { lastCfg = now; sendConfig().catch(() => {}); }
+  }
+}
+
+function showStats() {
+  if (!running) return;
+  const secs = (performance.now() - stats.t0) / 1000;
+  stats.fps = stats.frames / secs;
+  $("stats").textContent =
+    `serial   ${stats.serial}\n` +
+    `frames   ${stats.frames}  (${stats.fps.toFixed(1)} fps avg)   dropped ${stats.dropped}\n` +
+    `USB      ${(stats.bytes / secs / 1e6).toFixed(2)} MB/s\n` +
+    `header   Tfpa ${stats.tfpa}   VGSK ${stats.vgsk}\n` +
+    `raw      ${stats.lo} … ${stats.hi}\n` +
+    `browser  ${navigator.userAgent}`;
+  setTimeout(showStats, 500);
+}
+
+async function connect() {
+  if (!("usb" in navigator)) throw new Error("This browser has no WebUSB. Use Chrome or Edge, served from https:// or localhost.");
+  dev = await navigator.usb.requestDevice({ filters: [{ vendorId: VID, productId: PID }] });
+  await dev.open();
+  if (dev.configuration === null) await dev.selectConfiguration(1);
+  await dev.claimInterface(0);
+  await sendConfig();
+  running = true;
+  Object.assign(stats, { frames: 0, dropped: 0, bytes: 0, t0: performance.now() });
+  $("connect").disabled = true; $("disconnect").disabled = false;
+  showStats();
+  reader().catch(fail);
+}
+
+async function disconnect() {
+  running = false;
+  $("connect").disabled = false; $("disconnect").disabled = true;
+  if (dev) {
+    try { config[4] = 1; await sendConfig(); config[4] = 2; } catch {}
+    try { await dev.close(); } catch {}
+    dev = null;
+  }
+}
+
+function fail(e) {
+  running = false;
+  $("connect").disabled = false; $("disconnect").disabled = true;
+  $("stats").innerHTML = `<span class="err">${String(e && e.message || e)}</span>`;
+}
+
+$("connect").onclick = () => connect().catch(fail);
+$("disconnect").onclick = () => disconnect();
+</script>
+</body>
+</html>

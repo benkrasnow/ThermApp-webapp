@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Therm-App golden tests</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, monospace; padding: 16px; background: #fff; color: #111; }
+  .pass { color: #187a2f; } .fail { color: #c0281b; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Golden tests: JS port vs Python prototype</h1>
+<pre id="out">running…</pre>
+<script type="module">
+import { applyNuc, rawMedian, fillBadPixels, rawCenterOfMass, VgskController, DarkFrameAccumulator, subtractOffset } from "../js/processing.js";
+import { calibrationMaps, checkCalibration, fetchCalibration } from "../js/calibration.js";
+import { configFrom11bin, framePixels, parseHeader, PIXELS } from "../js/protocol.js";
+
+const out = document.getElementById("out");
+const lines = [];
+let failures = 0;
+const check = (ok, msg) => { if (!ok) failures++; lines.push(`<span class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}</span> ${msg}`); };
+
+const files = await fetchCalibration("../../calibration/215324084/");
+const info = checkCalibration(files);
+check(info.vgskMin === 1300 && info.vgskMax === 1580 && Math.abs(info.adrTarget - 0.25) < 1e-6 && !info.isTH,
+  `11.bin limits ${info.vgskMin}-${info.vgskMax}, adrTarget ${info.adrTarget}, TH=${info.isTH}`);
+const maps = calibrationMaps(files);
+check(maps.badPixels.length === 55, `bad pixels: ${maps.badPixels.length}`);
+const cfg = configFrom11bin(files["11.bin"]);
+check(cfg[13] === 25 && cfg[18] === 1475 && cfg[3] === 0xA5D5, `config from 11.bin: word13=${cfg[13]} word18=${cfg[18]}`);
+
+const expectMedian = { vgsk_1520: 1012, vgsk_1560: 1983, frame_0019: 98 };
+for (const name of ["vgsk_1520", "vgsk_1560", "frame_0019"]) {
+  const raw = await (await fetch(`../../prototype/captures/${name}.raw`)).arrayBuffer();
+  const ref = new Float32Array(await (await fetch(`ref_${name}.f32`)).arrayBuffer());
+  const h = parseHeader(raw);
+  const img = applyNuc(framePixels(raw), h.tfpa, h.vgsk, maps, new Float32Array(PIXELS));
+  let maxErr = 0;
+  for (let i = 0; i < PIXELS; i++) maxErr = Math.max(maxErr, Math.abs(img[i] - ref[i]));
+  check(maxErr < 0.5, `${name}: NUC max |JS - Python| = ${maxErr.toFixed(4)} (serial ${h.serial}, tfpa ${h.tfpa}, vgsk ${h.vgsk})`);
+  const med = rawMedian(framePixels(raw));
+  check(Math.abs(med - expectMedian[name]) <= 1, `${name}: raw median ${med} (numpy ${expectMedian[name]})`);
+  const isBad = new Uint8Array(PIXELS); for (const i of maps.badPixels) isBad[i] = 1;
+  fillBadPixels(img, maps.badPixels, isBad);
+  // Each filled value must lie within the range of the good pixels around it.
+  let outside = 0;
+  for (const i of maps.badPixels) {
+    const x0 = i % 384, y0 = (i / 384) | 0;
+    let lo = Infinity, hi = -Infinity;
+    for (let y = Math.max(0, y0 - 2); y <= Math.min(287, y0 + 2); y++)
+      for (let x = Math.max(0, x0 - 2); x <= Math.min(383, x0 + 2); x++) {
+        const j = y * 384 + x;
+        if (!isBad[j]) { lo = Math.min(lo, img[j]); hi = Math.max(hi, img[j]); }
+      }
+    if (img[i] < lo || img[i] > hi) outside++;
+  }
+  check(outside === 0, `${name}: ${maps.badPixels.length} bad pixels filled within neighbour range (${outside} outside)`);
+}
+// VGSK loop (port of native Func1): mean bin from numpy, expected next DAC value worked by hand.
+const expectBin = { vgsk_1520: [63.1717, 1520], vgsk_1560: [123.9569, 1551], frame_0019: [6.0033, 1483] };
+for (const [name, [bin, next]] of Object.entries(expectBin)) {
+  const raw = await (await fetch(`../../prototype/captures/${name}.raw`)).arrayBuffer();
+  const words = new Uint16Array(raw, 0, 32 + PIXELS);
+  const got = rawCenterOfMass(words);
+  check(Math.abs(got - bin) < 1e-3, `${name}: mean histogram bin ${got.toFixed(4)} (numpy ${bin})`);
+  const ctl = new VgskController(1300, 1580, 0.25, parseHeader(raw).vgsk);
+  check(ctl.update(words) === next, `${name}: VGSK ${parseHeader(raw).vgsk} → ${ctl.value} (expected ${next})`);
+}
+
+// Dark frame: a map built from a scene, subtracted from the same scene, leaves a flat image
+// at the scene's mean temperature (the map is zero-mean, so absolute level is kept).
+{
+  const raw = await (await fetch("../../prototype/captures/vgsk_1520.raw")).arrayBuffer();
+  const h = parseHeader(raw);
+  const isBad = new Uint8Array(PIXELS); for (const i of maps.badPixels) isBad[i] = 1;
+  const img = fillBadPixels(applyNuc(framePixels(raw), h.tfpa, h.vgsk, maps, new Float32Array(PIXELS)), maps.badPixels, isBad);
+  const acc = new DarkFrameAccumulator(4, isBad);
+  for (let k = 0; k < 4; k++) acc.add(img, h);
+  const { offset, stats } = acc.finish();
+  let mapMean = 0; for (let i = 0; i < PIXELS; i++) if (!isBad[i]) mapMean += offset[i];
+  mapMean /= PIXELS - maps.badPixels.length;
+  const flat = subtractOffset(Float32Array.from(img), offset);
+  let lo = Infinity, hi = -Infinity; for (const v of flat) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  check(Math.abs(mapMean) < 1e-3, `dark map is zero-mean (${mapMean.toExponential(2)}), RMS ${(stats.std / 100).toFixed(2)} °C`);
+  check(hi - lo < 0.01 && Math.abs(lo - stats.mean) < 0.01, `dark-corrected scene is flat at ${(lo / 100).toFixed(2)} °C (spread ${(hi - lo).toFixed(4)})`);
+}
+
+// Frame sync: below 25 fps the camera sends frames back to back, separated by padding, or
+// preceded by junk. Good frames must all be kept, and a truncated one counted as lost.
+{
+  const { ThermAppUsb } = await import("../js/usb.js");
+  const F = new Uint8Array(await (await fetch("../../prototype/captures/vgsk_1520.raw")).arrayBuffer());
+  const pad = (n) => new Uint8Array(n).map((_, i) => (i * 37) & 0xff);
+  const parts = [pad(5120), F, F, pad(11776), F, F.subarray(0, 100000), F, pad(2560)];
+  const stream = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+  let o = 0; for (const p of parts) { stream.set(p, o); o += p.length; }
+  let frames = 0; const u = new ThermAppUsb({}, () => frames++);
+  for (let i = 0; i < stream.length; i += 65536) { u._append(new DataView(stream.buffer, i, Math.min(65536, stream.length - i))); u._extract(); }
+  check(frames === 4 && u.stats.dropped === 1, `frame sync with padding/truncation: ${frames} frames kept (4), ${u.stats.dropped} lost (1)`);
+}
+
+lines.push("", failures ? `<span class="fail">${failures} FAILED</span>` : `<span class="pass">ALL PASSED</span>`);
+out.innerHTML = lines.join("\n");
+document.title = failures ? "FAIL" : "PASS";
+</script>
+</body>
+</html>

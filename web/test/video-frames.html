@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video frame-drop test</title>
+<style>body { font: 13px/1.5 ui-monospace, monospace; padding: 12px; background: #fff; color: #111; } canvas, video { display: none; }</style>
+</head>
+<body>
+<h1>Saved-video frame continuity</h1>
+<p>Draws frames at the sensor rate with the frame number encoded as 10 black/white blocks, records them, plays the file back and decodes every frame number to count missing and duplicated frames.</p>
+<pre id="out">running…</pre>
+<canvas id="c"></canvas>
+<script type="module">
+const params = new URLSearchParams(location.search);
+const SCALE = Number(params.get("scale") || 3), FPS = Number(params.get("fps") || 25.98), SECS = Number(params.get("secs") || 5);
+const MODE = params.get("mode") || "request";   // "rate": captureStream(N) | "request": captureStream(0) + requestFrame()
+const RATE = Number(params.get("rate") || 25);
+const TYPE = params.get("type") || "video/mp4;codecs=vp9";
+const MBPS = Number(params.get("mbps") || 30);
+const out = document.getElementById("out");
+const log = (s) => { out.textContent = (out.textContent === "running…" ? "" : out.textContent) + s + "\n"; };
+
+const canvas = document.getElementById("c");
+canvas.width = 384 * SCALE; canvas.height = 288 * SCALE;
+const ctx = canvas.getContext("2d");
+const BITS = 10, BLOCK = 48;
+
+// Busy noise background (like thermal video) plus the frame number as blocks along the top.
+const noise = ctx.createImageData(canvas.width, canvas.height);
+function draw(k) {
+  const d = noise.data;
+  let s = (k * 2654435761) >>> 0;
+  for (let i = 0; i < d.length; i += 4) {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    const v = 90 + (s >>> 26);
+    d[i] = v + 60; d[i + 1] = v; d[i + 2] = v + 30; d[i + 3] = 255;
+  }
+  ctx.putImageData(noise, 0, 0);
+  for (let b = 0; b < BITS; b++) {
+    ctx.fillStyle = (k >> b) & 1 ? "#fff" : "#000";
+    ctx.fillRect(8 + b * (BLOCK + 8), 8, BLOCK, BLOCK);
+  }
+}
+
+function decode(px, w) {
+  let k = 0;
+  for (let b = 0; b < BITS; b++) {
+    const x = 8 + b * (BLOCK + 8) + BLOCK / 2, y = 8 + BLOCK / 2, i = 4 * (y * w + x);
+    if (px[i] + px[i + 1] + px[i + 2] > 3 * 128) k |= 1 << b;
+  }
+  return k;
+}
+
+// mode=app: record through the app's own VideoRecorder (captureStream(0) + pushFrame).
+async function recordWithApp() {
+  const { VideoRecorder } = await import("../js/capture.js");
+  const chunks = [];
+  const folder = { name: "test", createWritable: async () => ({ write: async (b) => chunks.push(b), close: async () => {} }) };
+  const rec = new VideoRecorder(canvas, folder);
+  rec.fps = 25; rec.quality = params.get("quality") || "high";
+  rec.format = TYPE.includes("webm") ? "webm-vp9" : TYPE.includes("avc") ? "mp4-h264" : "mp4-vp9";
+  await rec.start();
+  const total = Math.round(FPS * SECS), t0 = performance.now();
+  let lateDraws = 0;
+  for (let k = 0; k < total; k++) {
+    const wait = t0 + k * 1000 / FPS - performance.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait)); else lateDraws++;
+    draw(k);
+    rec.pushFrame();
+  }
+  const pushed = rec.frames;
+  await new Promise((r) => setTimeout(r, 200));
+  await rec.stop();
+  return { blob: new Blob(chunks, { type: TYPE }), total, lateDraws, stats: { pushed, requestedMbps: (rec.bitrate() / 1e6).toFixed(1) } };
+}
+
+async function record() {
+  if (MODE === "app") return recordWithApp();
+  const stream = canvas.captureStream(MODE === "rate" ? RATE : 0);
+  const track = stream.getVideoTracks()[0];
+  const rec = new MediaRecorder(stream, { mimeType: TYPE, videoBitsPerSecond: MBPS * 1e6 });
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((r) => (rec.onstop = r));
+  rec.start(1000);
+  const total = Math.round(FPS * SECS), t0 = performance.now();
+  let lateDraws = 0;
+  for (let k = 0; k < total; k++) {
+    const due = t0 + k * 1000 / FPS;
+    const wait = due - performance.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait)); else lateDraws++;
+    draw(k);
+    if (MODE === "request") track.requestFrame();
+  }
+  const stats = track.stats ? { delivered: track.stats.deliveredFrames, discarded: track.stats.discardedFrames, total: track.stats.totalFrames } : null;
+  await new Promise((r) => setTimeout(r, 200));
+  rec.stop();
+  await done;
+  return { blob: new Blob(chunks, { type: TYPE }), total, lateDraws, stats };
+}
+
+// Visit every frame by seeking in steps shorter than a frame interval (works in a hidden tab,
+// unlike playback). Each frame shows up one or more times; gaps in the decoded numbers are drops.
+async function decodeAll(blob) {
+  const v = document.createElement("video");
+  v.muted = true; v.preload = "auto"; v.src = URL.createObjectURL(blob);
+  await new Promise((r) => (v.onloadeddata = r));
+  const c = document.createElement("canvas"); c.width = canvas.width; c.height = 64;
+  const cx = c.getContext("2d", { willReadFrequently: true });
+  const seen = [];
+  for (let t = 0; t < v.duration; t += 1 / 60) {
+    v.currentTime = t;
+    await new Promise((r) => (v.onseeked = r));
+    cx.drawImage(v, 0, 0, c.width, 64, 0, 0, c.width, 64);
+    const k = decode(cx.getImageData(0, 0, c.width, 64).data, c.width);
+    if (seen[seen.length - 1] !== k) seen.push(k);
+  }
+  return { seen, playerSkips: 0, duration: v.duration };
+}
+
+log(`mode ${MODE}${MODE === "rate" ? " (" + RATE + ")" : ""}, drawing ${FPS} fps for ${SECS} s at ${canvas.width}x${canvas.height}, ${TYPE} @ ${MBPS} Mbps`);
+const r = await record();
+const d = await decodeAll(r.blob);
+const uniq = [...new Set(d.seen)].sort((a, b) => a - b);
+const dupes = d.seen.length - uniq.length;
+let missing = 0;
+for (let i = 1; i < uniq.length; i++) missing += uniq[i] - uniq[i - 1] - 1;
+log(`drawn ${r.total} (late draws ${r.lateDraws}); track stats ${JSON.stringify(r.stats)}`);
+log(`file: ${(r.blob.size / 1e6).toFixed(1)} MB, duration ${d.duration.toFixed(2)} s; decoded ${d.seen.length} frames, ${uniq.length} unique (first ${uniq[0]}, last ${uniq[uniq.length - 1]})`);
+log(`MISSING ${missing} of ${uniq[uniq.length - 1] - uniq[0] + 1} (${(100 * missing / (uniq[uniq.length - 1] - uniq[0] + 1)).toFixed(1)}%), out-of-order/repeated ${dupes}`);
+const gaps = []; for (let i = 1; i < uniq.length; i++) if (uniq[i] - uniq[i - 1] > 1) gaps.push(uniq[i - 1] + 1);
+log(`first missing frames: ${gaps.slice(0, 12).join(", ")}`);
+document.title = "done";
+</script>
+</body>
+</html>

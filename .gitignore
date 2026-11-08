@@ -1,0 +1,20 @@
+# Proprietary third-party material: never publish
+*.apk
+decompiled/
+
+# Local environment and build output
+.venv/
+__pycache__/
+build/
+dist/
+.claude/
+
+# Captured media (snapshots, videos)
+media/
+prototype/media/
+
+# Raw frames: keep only the three used by the golden tests
+prototype/captures/*
+!prototype/captures/vgsk_1520.raw
+!prototype/captures/vgsk_1560.raw
+!prototype/captures/frame_0019.raw

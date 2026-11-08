@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<palette version="1.0" night="true">
+    <labels>
+        <label>red</label>
+        <label code="de">Rot</label>
+        <label code="es">rojo</label>
+        <label code="fr">rouge</label>
+        <label code="no">rød</label>
+    </labels>
+    <colors>
+        <color step="0">#000000</color>
+        <color step="64">#000044</color>
+        <color step="128">#000088</color>
+        <color step="192">#0000cc</color>
+        <color step="256">#0000ff</color>
+    </colors>
+    <hotspot>#aaaaaa</hotspot>
+</palette>

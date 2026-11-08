@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Therm-App Web</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Therm-App <span>Web</span></div>
+  <div id="status" class="status off"><i></i><span>Not connected</span></div>
+  <div class="spacer"></div>
+  <button id="btn-connect" class="primary">Connect camera</button>
+  <button id="btn-disconnect" hidden>Disconnect</button>
+</header>
+
+<main class="layout">
+  <section class="stage">
+    <div id="banner" class="banner" hidden></div>
+    <div class="viewer" id="viewer">
+      <canvas id="view" width="1152" height="864"></canvas>
+      <div id="rec-badge" class="rec-badge" hidden><i></i><span></span></div>
+      <div id="limit-hl" class="limit-hl" hidden></div>
+      <div id="placeholder" class="placeholder">
+        <p>Plug in the Therm-App and <span class="only-mouse">click</span><span class="only-touch">tap</span> <b>Connect</b>.</p>
+        <p class="hint">Needs Chrome or Edge. On Windows the camera needs the WinUSB driver (Zadig), installed once per PC.</p>
+      </div>
+    </div>
+    <!-- Touch layouts only: camera-style controls (a column at the right in landscape, a row in portrait). -->
+    <nav id="rail" class="rail" aria-label="Camera controls">
+      <button id="t-connect" class="primary">Connect</button>
+      <button id="t-snap" class="t-big" disabled aria-label="Snapshot">📷</button>
+      <button id="t-rec" class="t-big t-rec" disabled aria-label="Record"><i></i></button>
+      <button id="t-palette" aria-label="Next palette"><span class="t-swatch"></span></button>
+      <button id="t-range" aria-label="Range mode">Auto</button>
+      <button id="t-settings" aria-label="Settings">⚙</button>
+      <button id="t-full" aria-label="Full screen">⛶</button>
+    </nav>
+    <div class="readout">
+      <span id="ro-fps">– fps</span>
+      <span id="ro-spot">spot –</span>
+      <span id="ro-range">range –</span>
+      <span id="ro-vgsk" class="ro-detail">VGSK –</span>
+      <span id="ro-tfpa" class="ro-detail">Tfpa –</span>
+      <span id="ro-serial" class="ro-detail">serial –</span>
+      <span id="ro-dropped" class="dim" title="Lost: corrupted, or (at full rate) made by the sensor but never received. Skipped: received but not drawn because the page was busy.">lost 0 · skipped 0</span>
+    </div>
+    <div class="capture-bar">
+      <button id="btn-snap" class="big" disabled title="Snapshot (Space)">📷 Snapshot</button>
+      <button id="btn-rec" class="big" disabled title="Record video (R)">⏺ Record</button>
+      <span id="capture-msg" class="dim"></span>
+    </div>
+  </section>
+
+  <div id="scrim" class="scrim"></div>
+  <aside class="panel" id="panel">
+    <div id="tabs" class="tabs" role="tablist"></div>
+    <details open>
+      <summary>Palette</summary>
+      <div id="palettes" class="swatches"></div>
+    </details>
+
+    <details open>
+      <summary>Range</summary>
+      <div class="row">Units
+        <div class="seg compact" id="units">
+          <button data-unit="C">°C</button>
+          <button data-unit="F">°F</button>
+        </div>
+      </div>
+      <div class="seg" id="range-mode">
+        <button data-mode="auto">Auto</button>
+        <button data-mode="manual">Manual</button>
+      </div>
+      <p class="note top only-touch-block">Tip: tap the max or min temperature on the colour bar, then swipe up or down on the image to adjust it.</p>
+      <div id="auto-range">
+        <label class="row">Clip ends <input id="agc-ignore" type="range" min="0" max="5" step="0.1"><output id="agc-ignore-v"></output></label>
+        <label class="row">Smoothing <input id="agc-smooth" type="range" min="0.02" max="1" step="0.01"><output id="agc-smooth-v"></output></label>
+      </div>
+      <div id="manual-range" hidden>
+        <div class="row range-row"><span class="lbl">Max</span><input id="rng-hi" type="range"><span class="stepper"><button class="step" data-which="hi" data-dir="-1" aria-label="Lower max">−</button><input id="rng-hi-n" type="number"><button class="step" data-which="hi" data-dir="1" aria-label="Raise max">+</button></span><span class="unit"></span></div>
+        <div class="row range-row"><span class="lbl">Min</span><input id="rng-lo" type="range"><span class="stepper"><button class="step" data-which="lo" data-dir="-1" aria-label="Lower min">−</button><input id="rng-lo-n" type="number"><button class="step" data-which="lo" data-dir="1" aria-label="Raise min">+</button></span><span class="unit"></span></div>
+        <p class="note">Manual starts from the current auto range, so switching to it freezes the colours. Drag, type, or step by 0.1° with − / + (hold to repeat)<span class="only-mouse"> or the mouse wheel (Shift for 1°)</span>.</p>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Image</summary>
+      <label class="row">Frame rate
+        <select id="opt-fps" title="Camera frame rate">
+          <option value="25">Full (26 fps)</option>
+          <option value="20">20 fps</option>
+          <option value="15">15 fps</option>
+          <option value="10">10 fps</option>
+          <option value="9">9 fps</option>
+          <option value="5">5 fps</option>
+          <option value="2">2 fps</option>
+          <option value="1">1 fps</option>
+        </select>
+      </label>
+      <label class="check"><input id="opt-mirror" type="checkbox"> Mirror</label>
+      <label class="check"><input id="opt-flip" type="checkbox"> Flip</label>
+      <label class="check"><input id="opt-nuc" type="checkbox"> Factory correction (NUC)</label>
+      <label class="check"><input id="opt-badpix" type="checkbox"> Fill bad pixels</label>
+      <label class="row">Noise filter <input id="opt-temporal" type="range" min="0" max="0.9" step="0.05"><output id="opt-temporal-v"></output></label>
+    </details>
+
+    <details open>
+      <summary>Enhancement</summary>
+      <label class="check"><input id="enh-on" type="checkbox"> Enhance image <span class="dim only-mouse">(E)</span></label>
+      <div class="row">Resolution
+        <div class="seg compact" id="enh-scale">
+          <button data-scale="2">2×</button>
+          <button data-scale="3">3×</button>
+          <button data-scale="4">4×</button>
+        </div>
+      </div>
+      <label class="row">Interpolation
+        <select id="enh-interp">
+          <option value="lanczos">Lanczos (sharpest)</option>
+          <option value="bicubic">Bicubic</option>
+          <option value="bilinear">Bilinear</option>
+          <option value="nearest">Nearest (pixels)</option>
+        </select>
+      </label>
+      <label class="row">Denoise <input id="enh-denoise" type="range" min="0" max="3" step="0.1"><output id="enh-denoise-v"></output></label>
+      <label class="row">Detail <input id="enh-detail" type="range" min="1" max="4" step="0.1"><output id="enh-detail-v"></output></label>
+      <p class="note" id="enh-note">Edge-preserving denoise and halo-free detail boost, on the GPU. Only the picture changes: spot, min/max and saved temperatures use the unenhanced data. Noise now <span id="enh-noise">–</span>.</p>
+    </details>
+
+    <details open>
+      <summary>Dark frame</summary>
+      <p class="note top">Cover the lens with something of uniform temperature that fills the whole view, such as a lens cap, book or piece of card left at room temperature for a while. Then click Capture.</p>
+      <div class="row">
+        <button id="btn-dark" class="small" disabled>Capture dark frame</button>
+        <select id="dark-frames" title="Frames averaged">
+          <option value="16">16 frames</option>
+          <option value="32">32 frames</option>
+          <option value="64">64 frames</option>
+        </select>
+      </div>
+      <label class="check"><input id="opt-dark" type="checkbox"> Apply dark frame</label>
+      <p class="note" id="dark-status">No dark frame for this camera.</p>
+      <button id="btn-dark-clear" class="small" hidden>Clear dark frame</button>
+    </details>
+
+    <details open>
+      <summary>Overlays</summary>
+      <label class="check"><input id="ov-spot" type="checkbox"> Spot meter <span class="dim">(click image to move)</span></label>
+      <label class="check"><input id="ov-extremes" type="checkbox"> Min / max markers</label>
+      <label class="check"><input id="ov-colorbar" type="checkbox"> Colour bar</label>
+    </details>
+
+    <details>
+      <summary>Camera</summary>
+      <label class="check"><input id="vgsk-auto" type="checkbox"> Automatic bias (VGSK)</label>
+      <label class="row">VGSK <input id="vgsk-manual" type="range" min="1300" max="1580" step="1"><output id="vgsk-manual-v"></output></label>
+      <p class="note">The bias keeps the sensor at the operating point the factory calibration was made at. Leave it automatic for correct temperatures. Raw mean <span id="vgsk-mean">–</span> / target <span id="vgsk-target">–</span>.</p>
+    </details>
+
+    <details open>
+      <summary>Capture</summary>
+      <div class="row folder">Save to <b id="folder-name">Downloads</b> <button id="btn-folder" class="small">Choose folder…</button></div>
+      <label class="check"><input id="cap-tiff" type="checkbox"> Also save temperatures (32-bit TIFF, °C)</label>
+      <label class="check"><input id="cap-raw" type="checkbox"> Also save raw USB frame</label>
+      <label class="row">Video format <select id="vid-format"></select></label>
+      <label class="row">Video quality
+        <select id="vid-quality">
+          <option value="standard">Standard</option>
+          <option value="high">High</option>
+          <option value="maximum">Maximum</option>
+        </select>
+      </label>
+      <p class="note">Snapshots save the view as PNG. The TIFF holds every pixel's temperature in °C, for analysis or re-colouring. Video: <span id="video-fmt">–</span>.</p>
+    </details>
+
+    <details>
+      <summary>Calibration</summary>
+      <p class="note" id="cal-status">No camera connected.</p>
+      <button id="btn-import" class="small">Import calibration folder…</button>
+      <input id="file-import" type="file" webkitdirectory multiple hidden>
+      <ul id="cal-list" class="cal-list"></ul>
+      <p class="note">Each camera has factory calibration files that the old Android app kept in <code>/sdcard/ThermApp/&lt;serial&gt;/</code>. Opgal's download server no longer exists, so import that folder once. It stays in this browser and is never uploaded.</p>
+    </details>
+
+    <p class="keys dim only-mouse">Keys: Space snapshot · R record · P/Shift+P palette · M mirror · F flip · A auto/manual range · E enhancement</p>
+  </aside>
+</main>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

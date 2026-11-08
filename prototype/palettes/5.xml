@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<palette version="1.0">
+    <labels>
+        <label>spotter 1</label>
+        <label code="de">Finder 1</label>
+        <label code="es">observador de tiro 1</label>
+        <label code="fr">guetteur 1</label>
+        <label code="no">observatør 1</label>
+    </labels>
+    <colors>
+        <color step="0">#000000</color>
+        <color step="180">#bbbbbb</color>
+        <color step="181">#00ffff</color>
+        <color step="210">#0000ff</color>
+    </colors>
+    <hotspot>#ffffff</hotspot>
+</palette>
